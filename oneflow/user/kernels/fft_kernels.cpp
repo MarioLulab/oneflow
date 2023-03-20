@@ -22,10 +22,11 @@ namespace oneflow {
 
 namespace {
 
-
+// len = input_shape.back() / 2 + 1
+// n = output_shape.elem_cnt() / 2
 template<typename T>
 void convert_to_doublesized(const std::complex<T>* in, std::complex<T>* dst, size_t len, size_t n) {
-  size_t fact_len = 2 * len - 2;
+  size_t fact_len = 2 * len - 2;  // input_shape.back()
   for (int i = 0; i < n; i++) {
     int index_x = i / fact_len;
     int index_y = i % fact_len;
@@ -53,89 +54,94 @@ void comvert_to_real(const std::complex<T>* in, T* out, size_t n) {
   }
 }
 
-
 template<DeviceType device_type, typename T>
-class FftC2CKernel final : public user_op::OpKernel{
-public:
-    FftC2CKernel() = default;
-    ~FftC2CKernel() = default;
-private:
-    bool AlwaysComputeWhenAllOutputsEmpty() const override { return false; }
-    void Compute(user_op::KernelComputeContext* ctx) const override {
+class FftC2CKernel final : public user_op::OpKernel {
+ public:
+  FftC2CKernel() = default;
+  ~FftC2CKernel() = default;
 
-      const user_op::Tensor* input = ctx->Tensor4ArgNameAndIndex("input", 0);
-      user_op::Tensor* out = ctx->Tensor4ArgNameAndIndex("out", 0);
-      bool forward = ctx->Attr<bool>("forward");
-      const auto& norm_str = ctx->Attr<std::string>("norm");
-      const auto& dims = ctx->Attr<std::vector<int64_t>>("dims");
+ private:
+  bool AlwaysComputeWhenAllOutputsEmpty() const override { return false; }
+  void Compute(user_op::KernelComputeContext* ctx) const override {
+    const user_op::Tensor* input = ctx->Tensor4ArgNameAndIndex("input", 0);
+    user_op::Tensor* out = ctx->Tensor4ArgNameAndIndex("out", 0);
+    bool forward = ctx->Attr<bool>("forward");
+    const auto& norm_str = ctx->Attr<std::string>("norm");
+    const auto& dims = ctx->Attr<std::vector<int64_t>>("dims");
 
-      const T* input_ptr = input->dptr<T>();
-      T* out_ptr = out->mut_dptr<T>();
+    const T* input_ptr = input->dptr<T>();
+    T* out_ptr = out->mut_dptr<T>();
 
-      Shape input_shape (input->shape_view());
-      Shape out_shape (out->shape_view());
-      fft_norm_mode norm_mode = norm_from_string(norm_str, forward);
-      
+    Shape input_shape(input->shape_view());
+    Shape out_shape(out->shape_view());
+    fft_norm_mode norm_mode = norm_from_string(norm_str, forward);
 
-      if (input->data_type() == kComplex64){
-      // static void FftC2CForward(ep::Stream* stream, IN* data_in, OUT* data_out, const Shape& input_shape, 
-      //                           const Shape& output_shape, bool forward, const std::vector<int64_t>& dims, fft_norm_mode normalization){
-        FftC2CKernelUtil<device_type, std::complex<float>, std::complex<float>, float>(ctx->stream(), input_ptr, out_ptr,
-                                                                                       input_shape, out_shape, forward, dims, norm_mode);
-      }
-      else if (input->data_type() == kComplex128){
-        FftC2CKernelUtil<device_type, std::complex<double>, std::complex<double>, double>(ctx->stream(), input_ptr, out_ptr,
-                                                                                       input_shape, out_shape, forward, dims, norm_mode);
-      }
-      else{
-        Error::RuntimeError() << "expects kComplex64 or kComplex128, but got " << input->data_type();
-      }
+    if (input->data_type() == kComplex64) {
+      // static void FftC2CForward(ep::Stream* stream, IN* data_in, OUT* data_out, const Shape&
+      // input_shape,
+      //                           const Shape& output_shape, bool forward, const
+      //                           std::vector<int64_t>& dims, fft_norm_mode normalization){
+      FftC2CKernelUtil<device_type, std::complex<float>, std::complex<float>, float>::FftC2CForward(
+          ctx->stream(), input_ptr, out_ptr, input_shape, out_shape, input->stride(), out->stride(),
+          forward, dims, norm_mode);
+    } else if (input->data_type() == kComplex128) {
+      FftC2CKernelUtil<device_type, std::complex<double>, std::complex<double>,
+                       double>::FftC2CForward(ctx->stream(), input_ptr, out_ptr, input_shape,
+                                              out_shape, input->stride(), out->stride(), forward,
+                                              dims, norm_mode);
+    } else {
+      Error::RuntimeError() << "expects kComplex64 or kComplex128, but got " << input->data_type();
     }
+  }
 };
 
+template<DeviceType device_type, typename IN, typename OUT>
+class FftR2CKernel final : public user_op::OpKernel {
+ public:
+  FftR2CKernel() = default;
+  ~FftR2CKernel() = default;
 
-template<DeviceType device_type, typename T>
-class FftR2CKernel final : public user_op::OpKernel{
-public:
-    FftR2CKernel() = default;
-    ~FftR2CKernel() = default;
-private:
-    bool AlwaysComputeWhenAllOutputsEmpty() const override { return false; }
-    void Compute(user_op::KernelComputeContext* ctx) const override {
+ private:
+  bool AlwaysComputeWhenAllOutputsEmpty() const override { return false; }
+  void Compute(user_op::KernelComputeContext* ctx) const override {
+    const user_op::Tensor* input = ctx->Tensor4ArgNameAndIndex("input", 0);
+    user_op::Tensor* out = ctx->Tensor4ArgNameAndIndex("out", 0);
+    bool forward = ctx->Attr<bool>("forward");
+    bool onesided = ctx->Attr<bool>("onesided");
+    const auto& norm_str = ctx->Attr<std::string>("norm");
+    const auto& dims = ctx->Attr<std::vector<int64_t>>("dims");
+    const IN* input_ptr = input->dptr<IN>();
+    OUT* out_ptr = out->mut_dptr<OUT>();
 
-      const user_op::Tensor* input = ctx->Tensor4ArgNameAndIndex("input", 0);
-      user_op::Tensor* out = ctx->Tensor4ArgNameAndIndex("out", 0);
-      bool forward = ctx->Attr<bool>("forward");
-      bool onesided = ctx->Attr<bool>("onesided");
-      const auto& norm_str = ctx->Attr<std::string>("norm");
-      const auto& dims = ctx->Attr<std::vector<int64_t>>("dims");
+    Shape input_shape(input->shape_view());
+    Shape out_shape(out->shape_view());
+    fft_norm_mode norm_mode = norm_from_string(norm_str, forward);
 
-      const T* input_ptr = input->dptr<T>();
-      T* out_ptr = out->mut_dptr<T>();
-
-      Shape input_shape (input->shape_view());
-      Shape out_shape (out->shape_view());
-      fft_norm_mode norm_mode = norm_from_string(norm_str, forward);
-      
-
-      if (input->data_type() == kComplex64){
-      // static void FftC2CForward(ep::Stream* stream, IN* data_in, OUT* data_out, const Shape& input_shape, 
-      //                           const Shape& output_shape, bool forward, const std::vector<int64_t>& dims, fft_norm_mode normalization){
-        FftR2CKernelUtil<device_type, std::complex<float>, std::complex<float>, float>(ctx->stream(), input_ptr, out_ptr,
-                                                                                       input_shape, out_shape, forward, dims, norm_mode);
-      }
-      else if (input->data_type() == kComplex128){
-        FftR2CKernelUtil<device_type, std::complex<double>, std::complex<double>, double>(ctx->stream(), input_ptr, out_ptr,
-                                                                                       input_shape, out_shape, forward, dims, norm_mode);
-      }
-      else{
-        Error::RuntimeError() << "expects kComplex64 or kComplex128, but got " << input->data_type();
-      }
+    // get last dim half size
+    if (onesided) {
+      int64_t last_dim = dims.back();
+      int64_t last_dim_halfsize = (input_shape[last_dim]) / 2 + 1;
+      out_shape[last_dim] = last_dim_halfsize;
     }
+
+    if (input->data_type() == kComplex64) {
+      FftR2CKernelUtil<device_type, std::complex<float>, std::complex<float>, float>::FftR2CForward(
+          ctx->stream(), input_ptr, out_ptr, input_shape, out_shape, input->stride(), out->stride(),
+          forward, dims, norm_mode);
+    } else if (input->data_type() == kComplex128) {
+      FftR2CKernelUtil<device_type, std::complex<double>, std::complex<double>,
+                       double>::FftR2CForward(ctx->stream(), input_ptr, out_ptr, input_shape,
+                                              out_shape, input->stride(), out->stride(), forward,
+                                              dims, norm_mode);
+    } else {
+      Error::RuntimeError() << "expects kComplex64 or kComplex128, but gets " << input->data_type();
+    }
+
+    if (!onesided) { conj_symmetry(out_ptr, out_shape, out->stride(), dims, out_shape.elem_cnt()); }
+  }
 };
 
-
-#if 1
+#if 0
 template<typename IN, typename OUT>
 class StftCpuKernel final : public user_op::OpKernel {
  public:
@@ -205,18 +211,22 @@ REGISTER_STFT_CPU_KERNEL(double, std::complex<double>)
 REGISTER_STFT_CPU_KERNEL(float, std::complex<float>)
 #endif
 
-
-
-
-#define REGISTER_FFTC2C_KERNELS(device, dtype)                 \
-  REGISTER_USER_KERNEL("fft_c2c")       1                        \
-      .SetCreateFn<FftC2CKernel<device, dtype>>()              \
-      .SetIsMatchedHob((user_op::HobDeviceType() == device) \
-                       && (user_op::HobDataType("input", 0) == GetDataType<dtype>::value))
+#define REGISTER_FFTC2C_KERNELS(device, dtype)                                                \
+  REGISTER_USER_KERNEL("fft_c2c").SetCreateFn<FftC2CKernel<device, dtype>>().SetIsMatchedHob( \
+      (user_op::HobDeviceType() == device)                                                    \
+      && (user_op::HobDataType("input", 0) == GetDataType<dtype>::value))
 
 REGISTER_FFTC2C_KERNELS(DeviceType::kCPU, std::complex<float>);
 REGISTER_FFTC2C_KERNELS(DeviceType::kCPU, std::complex<double>);
 
+#define REGISTER_FFTR2C_KERNELS(device, in_dtype, out_dtype)    \
+  REGISTER_USER_KERNEL("fft_r2c")                               \
+      .SetCreateFn<FftR2CKernel<device, in_dtype, out_dtype>>() \
+      .SetIsMatchedHob((user_op::HobDeviceType() == device)     \
+                       && (user_op::HobDataType("input", 0) == GetDataType<in_dtype>::value))
+
+REGISTER_FFTR2C_KERNELS(DeviceType::kCPU, float, std::complex<float>);
+REGISTER_FFTR2C_KERNELS(DeviceType::kCPU, double, std::complex<double>);
 
 }  // namespace
 }  // namespace oneflow
